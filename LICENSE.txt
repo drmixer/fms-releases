@@ -1,0 +1,21 @@
+FMS END-USER TERMS
+
+Copyright (c) 2026 Josh Mencer. All rights reserved.
+
+FMS is proprietary freeware. You may download, install, use, and redistribute
+an unmodified official binary of FMS at no charge.
+
+You may not sell, rent, sublicense, modify, or create derivative works from FMS
+except where applicable law gives you a right that cannot be waived.
+
+FMS is provided "AS IS", without warranties of any kind, to the fullest extent
+permitted by law. The owner is not liable for lost data, lost credentials,
+business interruption, or other damages arising from use of the software.
+
+FMS can index local paths and metadata. You are responsible for choosing what
+to scan, maintaining backups, and safeguarding your device and operating-system
+account.
+
+Third-party components remain subject to their own notices and licenses in
+THIRD_PARTY_NOTICES.txt; nothing in these terms restricts rights those licenses
+grant. No purchase or donation is required to use FMS.

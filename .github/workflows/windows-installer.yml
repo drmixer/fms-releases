@@ -1,0 +1,102 @@
+name: Windows installer validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Exact public release tag (for example v0.1.0)
+        required: true
+        type: string
+      installer_sha256:
+        description: SHA-256 for the exact x64 NSIS installer
+        required: true
+        type: string
+      previous_tag:
+        description: Optional prior release tag; requires previous_sha256
+        required: false
+        type: string
+      previous_sha256:
+        description: Optional prior installer SHA-256; requires previous_tag
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    # This workflow belongs only in the separate public binary repository. The
+    # guard makes an accidental copy into a private repository a no-op.
+    if: github.event.repository.private == false && github.repository == 'drmixer/fms-releases'
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
+    env:
+      FMS_PUBLIC_RUNNER_TEST: '1'
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      RELEASE_SHA256: ${{ inputs.installer_sha256 }}
+      PREVIOUS_TAG: ${{ inputs.previous_tag }}
+      PREVIOUS_SHA256: ${{ inputs.previous_sha256 }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, verified 2026-11-02
+        with:
+          persist-credentials: false
+
+      - name: Validate requested public release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RELEASE_TAG -notmatch '\Av[0-9]+\.[0-9]+\.[0-9]+\z') { throw 'release_tag must be vMAJOR.MINOR.PATCH.' }
+          if ($env:RELEASE_SHA256 -notmatch '\A[A-Fa-f0-9]{64}\z') { throw 'installer_sha256 must be 64 hex characters.' }
+          if ([string]::IsNullOrWhiteSpace($env:PREVIOUS_TAG) -xor [string]::IsNullOrWhiteSpace($env:PREVIOUS_SHA256)) { throw 'previous_tag and previous_sha256 must be supplied together.' }
+          if ($env:PREVIOUS_TAG -and $env:PREVIOUS_TAG -notmatch '\Av[0-9]+\.[0-9]+\.[0-9]+\z') { throw 'previous_tag must be vMAJOR.MINOR.PATCH.' }
+          if ($env:PREVIOUS_SHA256 -and $env:PREVIOUS_SHA256 -notmatch '\A[A-Fa-f0-9]{64}\z') { throw 'previous_sha256 must be 64 hex characters.' }
+          if ($env:PREVIOUS_TAG -and [version]$env:PREVIOUS_TAG.Substring(1) -ge [version]$env:RELEASE_TAG.Substring(1)) { throw 'previous_tag must be older than release_tag.' }
+          "VERSION=$($env:RELEASE_TAG.Substring(1))" | Add-Content $env:GITHUB_ENV
+          if ($env:PREVIOUS_TAG) { "PREVIOUS_VERSION=$($env:PREVIOUS_TAG.Substring(1))" | Add-Content $env:GITHUB_ENV }
+
+      - name: Download and verify public installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $asset = "FMS-$env:VERSION-windows-x64-nsis.exe"
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern $asset --dir $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'Public release download failed.' }
+          $path = Join-Path $env:RUNNER_TEMP $asset
+          if ((Get-FileHash $path -Algorithm SHA256).Hash -ne $env:RELEASE_SHA256.ToUpperInvariant()) { throw 'Installer SHA-256 mismatch.' }
+          "INSTALLER_PATH=$path" | Add-Content $env:GITHUB_ENV
+
+      - name: Download and verify previous installer
+        if: env.PREVIOUS_TAG != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $asset = "FMS-$env:PREVIOUS_VERSION-windows-x64-nsis.exe"
+          gh release download $env:PREVIOUS_TAG --repo $env:GITHUB_REPOSITORY --pattern $asset --dir $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'Public release download failed.' }
+          $path = Join-Path $env:RUNNER_TEMP $asset
+          if ((Get-FileHash $path -Algorithm SHA256).Hash -ne $env:PREVIOUS_SHA256.ToUpperInvariant()) { throw 'Previous installer SHA-256 mismatch.' }
+          "PREVIOUS_INSTALLER_PATH=$path" | Add-Content $env:GITHUB_ENV
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6, verified 2026-11-02
+        with:
+          python-version: '3.13'
+
+      - name: Run isolated installer checks
+        shell: pwsh
+        env:
+          GH_TOKEN: ''
+          GITHUB_TOKEN: ''
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $params = @{ InstallerPath = $env:INSTALLER_PATH; Sha256 = $env:RELEASE_SHA256; Version = $env:VERSION }
+          if ($env:PREVIOUS_TAG) { $params.PreviousInstallerPath = $env:PREVIOUS_INSTALLER_PATH; $params.PreviousSha256 = $env:PREVIOUS_SHA256; $params.PreviousVersion = $env:PREVIOUS_VERSION }
+          ./tests/windows-installer.ps1 @params
