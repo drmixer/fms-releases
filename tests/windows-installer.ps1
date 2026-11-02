@@ -85,7 +85,7 @@ $appData = Join-Path $env:APPDATA 'com.findmyshit.fms'
 if (Test-Path -LiteralPath $appData) { throw 'FMS application data already exists; refusing to use this profile.' }
 if (@(Get-FmsRegistration).Count -ne 0) { throw 'FMS is already installed in this profile.' }
 
-$python = (Get-Command python -CommandType Application -ErrorAction Stop).Source
+$python = (Get-Command python -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $fixtureScript = Join-Path $PSScriptRoot 'metadata-fixture.py'
 $fixtureId = [guid]::NewGuid().ToString()
 $testRoot = Join-Path $env:RUNNER_TEMP "fms-installer-$fixtureId"
