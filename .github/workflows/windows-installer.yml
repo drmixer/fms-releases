@@ -72,31 +72,29 @@ jobs:
           if ((Get-FileHash $path -Algorithm SHA256).Hash -ne $env:RELEASE_SHA256.ToUpperInvariant()) { throw 'Installer SHA-256 mismatch.' }
           "INSTALLER_PATH=$path" | Add-Content $env:GITHUB_ENV
 
-      - name: Download and verify previous installer
-        if: env.PREVIOUS_TAG != ''
+      - name: Install the published desktop candidate
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $asset = "FMS-$env:PREVIOUS_VERSION-windows-x64-nsis.exe"
-          gh release download $env:PREVIOUS_TAG --repo $env:GITHUB_REPOSITORY --pattern $asset --dir $env:RUNNER_TEMP
-          if ($LASTEXITCODE -ne 0) { throw 'Public release download failed.' }
-          $path = Join-Path $env:RUNNER_TEMP $asset
-          if ((Get-FileHash $path -Algorithm SHA256).Hash -ne $env:PREVIOUS_SHA256.ToUpperInvariant()) { throw 'Previous installer SHA-256 mismatch.' }
-          "PREVIOUS_INSTALLER_PATH=$path" | Add-Content $env:GITHUB_ENV
+          if ($env:VERSION -ne '0.1.1' -or $env:RELEASE_SHA256 -ne '3fde43a8a81fbeae41bbbdb896d4e976407d5c3fe01b3fc03973cf3a8143d041') { throw 'Unexpected candidate.' }
+          if (Test-Path "$env:APPDATA/com.findmyshit.fms") { throw 'Expected a fresh profile.' }
+          $dir = Join-Path $env:RUNNER_TEMP 'FMS desktop test'
+          $setup = Start-Process $env:INSTALLER_PATH -ArgumentList "/S /D=$dir" -PassThru -Wait
+          if ($setup.ExitCode -ne 0) { throw 'Installation failed.' }
+          $exe = Join-Path $dir 'fms.exe'
+          if ((Get-Item $exe).VersionInfo.ProductVersion -notmatch '^0\.1\.1(?:\.0)?$') { throw 'Unexpected installed version.' }
+          "FMS_TEST_EXE=$exe" >> $env:GITHUB_ENV
 
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6, verified 2026-11-02
-        with:
-          python-version: '3.13'
-
-      - name: Run isolated installer checks
+      - name: Install WebView2 UI test driver
         shell: pwsh
-        env:
-          GH_TOKEN: ''
-          GITHUB_TOKEN: ''
+        run: npm install --prefix "$env:RUNNER_TEMP/fms-driver" --no-audit --no-fund --ignore-scripts playwright-core@1.57.0
+
+      - name: Exercise rendered credential, login and quit controls
+        shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $params = @{ InstallerPath = $env:INSTALLER_PATH; Sha256 = $env:RELEASE_SHA256; Version = $env:VERSION }
-          if ($env:PREVIOUS_TAG) { $params.PreviousInstallerPath = $env:PREVIOUS_INSTALLER_PATH; $params.PreviousSha256 = $env:PREVIOUS_SHA256; $params.PreviousVersion = $env:PREVIOUS_VERSION }
-          ./tests/windows-installer.ps1 @params
+          $env:NODE_PATH = Join-Path $env:RUNNER_TEMP 'fms-driver/node_modules'
+          node tests/desktop-ui.cjs
+
+      - name: Exercise Explorer tray menu
+        if: "!cancelled() && env.FMS_TEST_EXE != ''"
+        shell: powershell
+        run: ./tests/desktop-tray.ps1
