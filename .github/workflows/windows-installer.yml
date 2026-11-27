@@ -84,36 +84,14 @@ jobs:
           if ((Get-Item $exe).VersionInfo.ProductVersion -notmatch '^0\.1\.1(?:\.0)?$') { throw 'Unexpected installed version.' }
           "FMS_TEST_EXE=$exe" >> $env:GITHUB_ENV
 
-      - name: Install WebView2 UI test driver
-        shell: pwsh
-        run: npm install --prefix "$env:RUNNER_TEMP/fms-driver" --no-audit --no-fund --ignore-scripts playwright-core@1.57.0
+      - name: Verify Windows launch-at-login registration
+        shell: powershell
+        run: ./tests/desktop-accessibility.ps1 login
 
-      - name: Exercise rendered credential, login and quit controls
-        shell: pwsh
-        run: |
-          $env:NODE_PATH = Join-Path $env:RUNNER_TEMP 'fms-driver/node_modules'
-          node tests/desktop-ui.cjs
-
-      - name: Add a synthetic account
+      - name: Save and copy a synthetic credential
         if: "!cancelled() && env.FMS_TEST_EXE != ''"
-        shell: pwsh
-        run: |
-          $env:NODE_PATH = Join-Path $env:RUNNER_TEMP 'fms-driver/node_modules'
-          node tests/desktop-ui.cjs account
-
-      - name: Scan, map, reveal and search the test project
-        if: "!cancelled() && env.FMS_TEST_EXE != ''"
-        shell: pwsh
-        run: |
-          $env:NODE_PATH = Join-Path $env:RUNNER_TEMP 'fms-driver/node_modules'
-          node tests/desktop-ui.cjs scan
-
-      - name: Export and restore the test account
-        if: "!cancelled() && env.FMS_TEST_EXE != ''"
-        shell: pwsh
-        run: |
-          $env:NODE_PATH = Join-Path $env:RUNNER_TEMP 'fms-driver/node_modules'
-          node tests/desktop-ui.cjs backup
+        shell: powershell
+        run: ./tests/desktop-accessibility.ps1 credential
 
       - name: Exercise Explorer tray menu
         if: "!cancelled() && env.FMS_TEST_EXE != ''"

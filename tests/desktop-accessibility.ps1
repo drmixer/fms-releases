@@ -1,0 +1,103 @@
+param([ValidateSet('login','credential')]$Scenario)
+$ErrorActionPreference='Stop'
+$exe=Join-Path $env:RUNNER_TEMP 'FMS desktop test\fms.exe'
+if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:GITHUB_REPOSITORY -ne 'drmixer/fms-releases' -or $env:FMS_TEST_EXE -ne $exe) { throw 'Requires the installed QA package.' }
+Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,System.Windows.Forms
+$ui=[Windows.Automation.AutomationElement]
+$types=[Windows.Automation.ControlType]
+$work=New-Item -ItemType Directory (Join-Path $env:RUNNER_TEMP ('fms-uia-'+[guid]::NewGuid()))
+function Launch {
+    $env:FMS_SMOKE_DIAGNOSTICS=Join-Path $work ([guid]::NewGuid().ToString()+'.log')
+    $script:app=Start-Process $exe -PassThru
+    for($i=0; $i -lt 80; $i++) {
+        $line=Get-Content $env:FMS_SMOKE_DIAGNOSTICS -ErrorAction SilentlyContinue | Select-String '^startup-main-window hwnd=0x([a-fA-F0-9]+)' | Select-Object -First 1
+        if ($line) { break }
+        Start-Sleep -Milliseconds 200
+    }
+    if (-not $line) { throw 'Expected FMS main window.' }
+    $script:root=$ui::FromHandle([IntPtr]::new([Convert]::ToInt64($line.Matches[0].Groups[1].Value,16)))
+}
+function Find-Control($name,$type) {
+    $cond=[Windows.Automation.PropertyCondition]::new($ui::ControlTypeProperty,$type)
+    for ($i=0; $i -lt 24; $i++) {
+        $all=$root.FindAll([Windows.Automation.TreeScope]::Descendants,$cond)
+        $elem=$all | Where-Object { $_.Current.Name -like $name } | Select-Object -First 1
+        if ($elem) { return $elem }
+        Start-Sleep -Milliseconds 250
+    }
+    $root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition) | Select-Object -First 100 | ForEach-Object { Write-Host ($_.Current.ControlType.ProgrammaticName+' '+$_.Current.Name) }
+    throw "FMS accessibility control missing: $name"
+}
+function Click($name) {
+    $el=Find-Control $name $types::Button
+    $el.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+}
+function Fill($name,$value) {
+    $el=Find-Control $name $types::Edit
+    $el.SetFocus()
+    [Windows.Forms.SendKeys]::SendWait('^a')
+    [Windows.Forms.SendKeys]::SendWait($value)
+}
+function Quit {
+    Click 'Settings'
+    Click 'Quit FMS'
+    if (-not $app.WaitForExit(8000) -or $app.ExitCode -ne 0) { throw 'Settings Quit did not exit cleanly.' }
+}
+function Entries {
+    foreach ($rootKey in [Microsoft.Win32.Registry]::CurrentUser,[Microsoft.Win32.Registry]::LocalMachine) {
+        $key=$rootKey.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Run')
+        if ($key) { $v=$key.GetValue('FMS'); if ($v) { $v }; $key.Dispose() }
+    }
+}
+try {
+    Launch
+    if ($Scenario -eq 'login') {
+        Click 'Settings'
+        $toggle=Find-Control 'Launch at login*' $types::CheckBox
+        $pattern=$toggle.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
+        if (@(Entries).Count) { throw 'Expected a clean launch registration.' }
+        $pattern.Toggle()
+        for ($i=0;$i -lt 25 -and -not @(Entries).Count;$i++) { Start-Sleep -Milliseconds 200 }
+        $values=@(Entries)
+        $quoted=$values.Count -eq 1 -and $values[0] -eq ('"'+$exe+'" --background')
+        $plain=$values.Count -eq 1 -and $values[0] -eq ($exe+' --background')
+        Write-Host "Startup entries=$($values.Count) matched=$($quoted -or $plain) quoted=$quoted"
+        if ($values.Count) {
+            $pattern.Toggle()
+            for ($i=0;$i -lt 25 -and @(Entries).Count;$i++) { Start-Sleep -Milliseconds 200 }
+            if (@(Entries).Count) { throw 'Disabling did not clear the startup registration.' }
+            Write-Host 'PASS: Disabling launch at login cleared the registration.'
+        }
+        Click 'Quit FMS'
+        if (-not $app.WaitForExit(8000) -or $app.ExitCode -ne 0) { throw 'Settings Quit failed.' }
+        Write-Host 'PASS: Settings Quit exited normally.'
+        if (-not $quoted) { throw 'Expected a quoted executable in the startup entry.' }
+    } else {
+        $dir=New-Item -ItemType Directory (Join-Path $work 'local-project')
+        $source=Join-Path $dir '.env'
+        $original=[guid]::NewGuid().ToString()
+        [IO.File]::WriteAllText($source,('RESEND_API_KEY='+$original))
+        Click '+ Project'
+        Fill 'Project name' 'Native QA'
+        Fill 'Local folder*' $dir.FullName
+        Click 'Add project'
+        Start-Sleep -Milliseconds 800
+        Fill 'Search projects, services, accounts and identities' 'RESEND_API_KEY'
+        Click 'Securely save'
+        [void](Find-Control 'Copy secret' $types::Button)
+        Write-Host 'PASS: FMS UI saved a synthetic credential.'
+        Quit
+        [IO.File]::WriteAllText($source,('RESEND_API_KEY='+[guid]::NewGuid()))
+        Launch
+        Fill 'Search projects, services, accounts and identities' 'RESEND_API_KEY'
+        Set-Clipboard 'fms-test-marker'
+        Click 'Copy secret'
+        for ($i=0;$i -lt 25 -and (Get-Clipboard -Raw).Trim() -ne $original;$i++) { Start-Sleep -Milliseconds 200 }
+        if ((Get-Clipboard -Raw).Trim() -ne $original) { throw 'Clipboard did not contain the originally saved test value.' }
+        Set-Clipboard 'fms-test-complete'
+        Write-Host 'PASS: Copy secret returned the saved value after restart and a source change.'
+        Quit
+    }
+} finally {
+    if ($app -and -not $app.HasExited) { $app.Kill() }
+}

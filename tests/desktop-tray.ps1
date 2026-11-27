@@ -7,7 +7,7 @@ Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public class TrayQA {
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string name);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, IntPtr name);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out int pid);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
@@ -18,7 +18,7 @@ public class TrayQA {
 '@
 function Controls($className, $ownerId = 0) {
     $handle = [IntPtr]::Zero
-    while (($handle = [TrayQA]::FindWindowEx([IntPtr]::Zero,$handle,$className,$null)) -ne [IntPtr]::Zero) {
+    while (($handle = [TrayQA]::FindWindowEx([IntPtr]::Zero,$handle,$className,[IntPtr]::Zero)) -ne [IntPtr]::Zero) {
         if (-not [TrayQA]::IsWindowVisible($handle)) { continue }
         $owner = 0
         [void][TrayQA]::GetWindowThreadProcessId($handle,[ref]$owner)
@@ -40,7 +40,7 @@ function Click-Control($element, $right = $false) {
 function Click-TrayItem($name) {
     $expanded = $false
     for ($attempt=0; $attempt -lt 8; $attempt++) {
-        $items = @(foreach ($className in 'Shell_TrayWnd','NotifyIconOverflowWindow','TopLevelWindowForOverflowXamlIsland') { Controls $className })
+        $items = @(foreach ($className in 'Shell_TrayWnd','NotifyIconOverflowWindow','TopLevelWindowForOverflowXamlIsland','XamlExplorerHostIslandWindow') { Controls $className })
         $icon = $null
         foreach ($candidate in $items) {
             if ($candidate.Current.Name -notmatch '^FMS(?:$|\s)' -or $candidate.Current.IsOffscreen) { continue }
@@ -78,6 +78,10 @@ function WindowSize {
     return @{ Width=$r.right-$r.left; Height=$r.bottom-$r.top }
 }
 $env:FMS_SMOKE_DIAGNOSTICS = Join-Path $env:RUNNER_TEMP ('fms-tray-'+[guid]::NewGuid()+'.log')
+if (-not [TrayQA]::FindWindowEx([IntPtr]::Zero,[IntPtr]::Zero,'Shell_TrayWnd',[IntPtr]::Zero).ToInt64()) {
+    Start-Process explorer.exe
+    Start-Sleep -Seconds 4
+}
 $app = Start-Process -FilePath $exe -PassThru
 try {
     for ($i=0; $i -lt 60; $i++) {
