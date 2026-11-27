@@ -112,3 +112,8 @@ jobs:
         if: "!cancelled() && env.FMS_TEST_EXE != ''"
         shell: powershell
         run: ./tests/desktop-tray.ps1
+
+      - name: Download the public installer in Edge
+        if: "!cancelled() && env.FMS_TEST_EXE != ''"
+        shell: powershell
+        run: ./tests/desktop-download.ps1

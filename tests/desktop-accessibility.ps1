@@ -21,7 +21,7 @@ function Find-Control($name,$type) {
     $cond=[Windows.Automation.PropertyCondition]::new($ui::ControlTypeProperty,$type)
     for ($i=0; $i -lt 24; $i++) {
         $all=$root.FindAll([Windows.Automation.TreeScope]::Descendants,$cond)
-        $elem=$all | Where-Object { $_.Current.Name -like $name } | Select-Object -First 1
+        $elem=$all | Where-Object { $_.Current.Name -like $name -and $_.Current.IsEnabled } | Select-Object -First 1
         if ($elem) { return $elem }
         Start-Sleep -Milliseconds 250
     }
@@ -34,9 +34,16 @@ function Click($name) {
 }
 function Fill($name,$value) {
     $el=Find-Control $name $types::Edit
-    $el.SetFocus()
-    [Windows.Forms.SendKeys]::SendWait('^a')
-    [Windows.Forms.SendKeys]::SendWait($value)
+    $field=$el.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
+    for ($i=0; $i -lt 3; $i++) {
+        $el.SetFocus()
+        [Windows.Forms.SendKeys]::SendWait('^a')
+        [Windows.Forms.SendKeys]::SendWait($value)
+        if ($field.Current.Value -ceq $value) { return }
+        $field.SetValue($value)
+        if ($field.Current.Value -ceq $value) { return }
+    }
+    throw "Could not fill $name."
 }
 function Quit {
     Click 'Settings'
