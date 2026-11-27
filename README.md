@@ -15,16 +15,11 @@ may be offered only through a link chosen and published by the owner.
 See [installation](INSTALL.md), [release notes](RELEASE-NOTES.md), and the
 [end-user terms](LICENSE.txt). This repository is not an open-source release.
 
-The current release is a [Windows x64 prerelease candidate](https://github.com/drmixer/fms-releases/releases/tag/v0.1.0).
-Its [automated installer checks passed](https://github.com/drmixer/fms-releases/actions/runs/41436815099)
-on Windows Server 2025 x64 and Windows 11 ARM running the x64 app through
-emulation. Mac packages are not published here yet.
+## Release status
 
-The checks covered install, same-version reinstall, uninstall, synthetic account
-preservation, native window/background behavior, global shortcuts, and an OS
-Credential Manager capability probe. They do not establish rendered UI,
-FMS secret save/copy, SmartScreen/UAC, tray menus, normal quitting, sign-in
-startup, or an older-version upgrade. This remains a prerelease.
+**Windows coming soon.** The stable Windows build is still in testing. Windows testers can use the [0.1.1 x64 prerelease and checksums](https://github.com/drmixer/fms-releases/releases/tag/v0.1.1). The free Mac build is in release preparation.
+
+The 0.1.1 tests covered clean installation, upgrades, account linking, credential save and copy, and backup restore. Launch at login has a known issue when the installation folder contains spaces. We still need a standard Windows desktop check of the first-launch prompts and sign-in behavior. [Desktop test results](https://github.com/drmixer/fms-releases/actions/runs/45990995669)
 
 The public-only installer workflow tests a specific checksum-verified binary
 on disposable GitHub-hosted runners. It never checks out private application
