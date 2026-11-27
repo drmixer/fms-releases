@@ -95,7 +95,10 @@ try {
         & "$PSScriptRoot/desktop-dialog.ps1" -AppId $app.Id -Title 'Choose where your projects live' -Action 'Select Folder' -Value $scanRoot.FullName
         Click 'Select all'
         Click 'Import selected'
+        [void](Find-Control 'Imported 1 project*' $types::Text)
         Fill 'Search projects, services, accounts and identities' 'qa-scan-project'
+        [void](Find-Control 'qa-scan-project' $types::Text)
+        Start-Sleep -Milliseconds 500
         Click 'Manage project'
         Write-Host 'PASS: Scanned a folder and imported the discovered project.'
         Click 'Connect account'
@@ -118,10 +121,11 @@ try {
         [void](Find-Control '*desktop@example.invalid*' $types::ListItem)
         Write-Host 'PASS: Ctrl+Shift+F opened Quick Find and returned the saved account.'
     } elseif ($Scenario -eq 'backup') {
-        $file=Join-Path $work 'metadata.json'
+        $file=Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'FMS-metadata-backup.json'
+        if (Test-Path $file) { throw 'Expected a fresh default backup destination.' }
         Click 'Settings'
         Click 'Export backup'
-        & "$PSScriptRoot/desktop-dialog.ps1" -AppId $app.Id -Title 'Export private FMS metadata' -Action 'Save' -Value $file
+        & "$PSScriptRoot/desktop-dialog.ps1" -AppId $app.Id -Title 'Export private FMS metadata' -Action 'Save'
         [void](Find-Control 'Metadata backup saved*' $types::Text)
         $data=(Get-Content $file -Raw | ConvertFrom-Json)
         if ($data.format -ne 'fms-metadata-backup' -or 'desktop@example.invalid' -notin $data.identities.value) { throw 'Backup missing the expected account.' }

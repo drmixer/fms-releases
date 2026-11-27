@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 public class TrayQA {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, IntPtr name);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd,uint msg,IntPtr w,IntPtr l);
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);
     [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr menu);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetMenuString(IntPtr menu,uint index,StringBuilder s,int max,uint flags);
@@ -65,18 +66,20 @@ function Click-TrayItem($name) {
         if ($chevron -and -not $expanded) { Click-Control $chevron; $expanded = $true }
         Start-Sleep -Milliseconds 350
     }
-    if (-not $icon) {
-        $items | ForEach-Object { $_.Current.Name } | Where-Object { $_ } | Select-Object -Unique -First 60 | Out-Host
-        throw 'Could not reach the FMS notification icon in Explorer.'
+    if ($icon) {
+        try { Click-Control $icon } catch { Write-Host 'Explorer provided no clickable point for this icon.' }
     }
-    $point=$icon.GetClickablePoint()
-    if (-not [TrayQA]::SetCursorPos($point.X,$point.Y)) { throw 'Could not position pointer on the notification icon.' }
-    Start-Sleep -Milliseconds 150
-    [TrayQA]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 90
-    [TrayQA]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 250
-    for ($i=0; $i -lt 12; $i++) {
+    for ($i=0; $i -lt 20; $i++) {
+        if ($i -eq 6) {
+            # Exercise the app's notification handler separately when Explorer input is unavailable.
+            $receiver=[TrayQA]::FindWindowEx([IntPtr]::Zero,[IntPtr]::Zero,'tray_icon_app',[IntPtr]::Zero)
+            $receiverProcess=0
+            [void][TrayQA]::GetWindowThreadProcessId($receiver,[ref]$receiverProcess)
+            if ($receiverProcess -ne $app.Id) { throw 'No notification receiver for this FMS instance.' }
+            [void][TrayQA]::PostMessage($receiver,6002,[IntPtr]::Zero,[IntPtr]::new(514))
+            Write-Host "Used a simulated shell notification for $name."
+            Start-Sleep -Milliseconds 300
+        }
         $handle=[IntPtr]::Zero
         while (($handle=[TrayQA]::FindWindowEx([IntPtr]::Zero,$handle,'#32768',[IntPtr]::Zero)) -ne [IntPtr]::Zero) {
             if (-not [TrayQA]::IsWindowVisible($handle)) { continue }

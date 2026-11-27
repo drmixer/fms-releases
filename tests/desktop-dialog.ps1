@@ -26,7 +26,11 @@ do {
         $button=$controls | Where-Object { $_.Current.Name.Replace('&','') -eq $Action } | Select-Object -First 1
         if ($button) {
             [void][DialogQA]::SetForegroundWindow($hwnd)
-            if ($Value) {
+            if ($Action -eq 'Open') {
+                $item=$controls | Where-Object { $_.Current.ControlType -eq [Windows.Automation.ControlType]::ListItem -and $_.Current.Name -like 'FMS-metadata-backup*' } | Select-Object -First 1
+                if ($item) { $item.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select() }
+                else { Start-Sleep -Milliseconds 200; continue }
+            } elseif ($Value) {
                 $fieldId=if ($Action -eq 'Select Folder') { '1152' } else { '1001' }
                 $edit=$controls | Where-Object { $_.Current.AutomationId -eq $fieldId -and $_.Current.Name -notlike 'Address:*' -and $_.Current.NativeWindowHandle } | Select-Object -First 1
                 if (-not $edit) { Start-Sleep -Milliseconds 200; continue }
