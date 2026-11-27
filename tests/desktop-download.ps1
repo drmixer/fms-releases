@@ -41,10 +41,15 @@ if (Test-Path $target) {
     Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
     $ui=[Windows.Automation.AutomationElement]
     $windows=$ui::RootElement.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
-    foreach ($win in $windows) {
+    $observed=@(foreach ($win in $windows) {
         if ($win.Current.Name -notmatch 'Edge|Downloads' -or (Get-Process -id $win.Current.ProcessId).ProcessName -ne 'msedge') { continue }
         $win.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition) |
-            ForEach-Object { $_.Current.Name } | Where-Object { $_ -match 'FMS-|uncommon|commonly downloaded|trust|blocked|dangerous|virus|harm|verify|couldn.t download' } | Select-Object -Unique -First 12 | Out-Host
+            ForEach-Object { $_.Current.Name } | Where-Object { $_ -match 'FMS-|uncommon|commonly downloaded|trust|blocked|dangerous|virus|harm|verify|couldn.t download' } | Select-Object -Unique -First 12
+    })
+    $observed | Out-Host
+    if ($observed | Where-Object { $_.Contains($asset) -and $_ -match "isn't commonly downloaded" }) {
+        Write-Host 'OBSERVED: Edge held the official installer for a download-reputation decision. The test stopped at the browser warning.'
+        return
     }
     $history=Join-Path $profile 'Default/History'
     if (Test-Path $history) {

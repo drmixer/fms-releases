@@ -112,9 +112,21 @@ try {
             foreach($window in $shell.Windows()) {
                 try { foreach($item in $window.Document.SelectedItems()) { if ($item.Path -eq $folder.FullName -or $item.Path -eq ('\\?\'+$folder.FullName)) { $found=$true } } } catch {}
             }
+            $windows=$ui::RootElement.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition) | Where-Object { $_.Current.ClassName -eq 'CabinetWClass' }
+            foreach ($win in $windows) {
+                $match=[Windows.Automation.PropertyCondition]::new($ui::NameProperty,'qa-scan-project')
+                foreach ($item in $win.FindAll([Windows.Automation.TreeScope]::Descendants,$match)) {
+                    $selection=$null
+                    if ($item.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern,[ref]$selection) -and $selection.Current.IsSelected) { $found=$true }
+                }
+            }
             Start-Sleep -Milliseconds 200
         }
         if ($found) { Write-Host 'PASS: Explorer selected the scanned project folder.' }
+        else {
+            $windows | ForEach-Object { Write-Host ('Explorer window after Reveal: '+$_.Current.Name) }
+            $root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } | Where-Object { $_ -match 'could not|failed|couldn.t|shown in|denied|cannot find' } | Select-Object -Unique | Out-Host
+        }
         [Windows.Forms.SendKeys]::SendWait('^+f')
         Fill 'Quick Find' 'desktop@example.invalid'
         [void](Find-Control '*desktop@example.invalid*' $types::ListItem)
