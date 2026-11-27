@@ -93,6 +93,21 @@ jobs:
         shell: powershell
         run: ./tests/desktop-accessibility.ps1 credential
 
+      - name: Save a synthetic account
+        if: "!cancelled() && env.FMS_TEST_EXE != ''"
+        shell: powershell
+        run: ./tests/desktop-accessibility.ps1 account
+
+      - name: Scan, link and reveal a project
+        if: "!cancelled() && env.FMS_TEST_EXE != ''"
+        shell: powershell
+        run: ./tests/desktop-accessibility.ps1 scan
+
+      - name: Export then restore into a fresh profile
+        if: "!cancelled() && env.FMS_TEST_EXE != ''"
+        shell: powershell
+        run: ./tests/desktop-accessibility.ps1 backup
+
       - name: Exercise Explorer tray menu
         if: "!cancelled() && env.FMS_TEST_EXE != ''"
         shell: powershell

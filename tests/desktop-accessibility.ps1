@@ -1,4 +1,4 @@
-param([ValidateSet('login','credential')]$Scenario)
+param([ValidateSet('login','credential','account','scan','backup')]$Scenario)
 $ErrorActionPreference='Stop'
 $exe=Join-Path $env:RUNNER_TEMP 'FMS desktop test\fms.exe'
 if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:GITHUB_REPOSITORY -ne 'drmixer/fms-releases' -or $env:FMS_TEST_EXE -ne $exe) { throw 'Requires the installed QA package.' }
@@ -72,6 +72,71 @@ try {
         if (-not $app.WaitForExit(8000) -or $app.ExitCode -ne 0) { throw 'Settings Quit failed.' }
         Write-Host 'PASS: Settings Quit exited normally.'
         if (-not $quoted) { throw 'Expected a quoted executable in the startup entry.' }
+    } elseif ($Scenario -eq 'account') {
+        Click '+ Account'
+        Fill 'Service' 'Resend'
+        Fill 'Email / username' 'desktop@example.invalid'
+        Click 'Save account'
+        [void](Find-Control 'Account saved locally*' $types::Text)
+        Write-Host 'PASS: Added an account in FMS through its Windows UI.'
+        Quit
+    } elseif ($Scenario -eq 'scan') {
+        $scanRoot=New-Item -ItemType Directory (Join-Path $work 'scan')
+        $folder=New-Item -ItemType Directory (Join-Path $scanRoot 'qa-scan-project')
+        [IO.File]::WriteAllText((Join-Path $folder 'package.json'),'{"name":"qa-scan-project","dependencies":{"resend":"1.0.0"}}')
+        Click 'Scan'
+        & "$PSScriptRoot/desktop-dialog.ps1" -AppId $app.Id -Title 'Choose where your projects live' -Action 'Select Folder' -Value $scanRoot.FullName
+        Click 'Select all'
+        Click 'Import selected'
+        Fill 'Search projects, services, accounts and identities' 'qa-scan-project'
+        Click 'Manage project'
+        Write-Host 'PASS: Scanned a folder and imported the discovered project.'
+        Click 'Connect account'
+        Click '*desktop@example.invalid*'
+        [void](Find-Control 'Manage account' $types::Button)
+        Write-Host 'PASS: Linked the test account to the imported project.'
+        Click 'Reveal'
+        $shell=New-Object -ComObject Shell.Application
+        $found=$false
+        for ($i=0;$i -lt 20 -and -not $found;$i++) {
+            foreach($window in $shell.Windows()) {
+                try { foreach($item in $window.Document.SelectedItems()) { if ($item.Path -eq $folder.FullName) { $found=$true } } } catch {}
+            }
+            Start-Sleep -Milliseconds 200
+        }
+        if (-not $found) { throw 'Explorer did not select the test project folder.' }
+        Write-Host 'PASS: Explorer selected the scanned project folder.'
+        [Windows.Forms.SendKeys]::SendWait('^+f')
+        Fill 'Quick Find' 'desktop@example.invalid'
+        [void](Find-Control '*desktop@example.invalid*' $types::ListItem)
+        Write-Host 'PASS: Ctrl+Shift+F opened Quick Find and returned the saved account.'
+    } elseif ($Scenario -eq 'backup') {
+        $file=Join-Path $work 'metadata.json'
+        Click 'Settings'
+        Click 'Export backup'
+        & "$PSScriptRoot/desktop-dialog.ps1" -AppId $app.Id -Title 'Export private FMS metadata' -Action 'Save' -Value $file
+        [void](Find-Control 'Metadata backup saved*' $types::Text)
+        $data=(Get-Content $file -Raw | ConvertFrom-Json)
+        if ($data.format -ne 'fms-metadata-backup' -or 'desktop@example.invalid' -notin $data.identities.value) { throw 'Backup missing the expected account.' }
+        Write-Host 'PASS: The exported backup contained the synthetic account.'
+        Click 'Quit FMS'
+        if (-not $app.WaitForExit(8000) -or $app.ExitCode -ne 0) { throw 'Export session failed to exit cleanly.' }
+        $profileDir=Join-Path $env:APPDATA 'com.findmyshit.fms'
+        if (-not (Test-Path (Join-Path $profileDir 'fms.sqlite3'))) { throw 'Expected disposable app database.' }
+        Move-Item -LiteralPath $profileDir -Destination (Join-Path $work 'original')
+        Launch
+        Click 'Settings'
+        Click 'Restore backup'
+        & "$PSScriptRoot/desktop-dialog.ps1" -AppId $app.Id -Title 'Restore FMS metadata' -Action 'Open' -Value $file
+        & "$PSScriptRoot/desktop-dialog.ps1" -AppId $app.Id -Title 'Restore FMS metadata' -Action 'Restore metadata'
+        [void](Find-Control 'Metadata restored for*' $types::Text)
+        Click 'Quit FMS'
+        if (-not $app.WaitForExit(8000) -or $app.ExitCode -ne 0) { throw 'Restore session failed to exit cleanly.' }
+        Launch
+        Fill 'Search projects, services, accounts and identities' 'desktop@example.invalid'
+        [void](Find-Control '*desktop@example.invalid*' $types::Text)
+        Write-Host 'PASS: Restored the account into an empty profile and found it after restart.'
+        Quit
     } else {
         $dir=New-Item -ItemType Directory (Join-Path $work 'local-project')
         $source=Join-Path $dir '.env'
@@ -83,6 +148,7 @@ try {
         Click 'Add project'
         Start-Sleep -Milliseconds 800
         Fill 'Search projects, services, accounts and identities' 'RESEND_API_KEY'
+        Click 'Manage project'
         Click 'Securely save'
         [void](Find-Control 'Copy secret' $types::Button)
         Write-Host 'PASS: FMS UI saved a synthetic credential.'
@@ -90,6 +156,7 @@ try {
         [IO.File]::WriteAllText($source,('RESEND_API_KEY='+[guid]::NewGuid()))
         Launch
         Fill 'Search projects, services, accounts and identities' 'RESEND_API_KEY'
+        Click 'Manage project'
         Set-Clipboard 'fms-test-marker'
         Click 'Copy secret'
         for ($i=0;$i -lt 25 -and (Get-Clipboard -Raw).Trim() -ne $original;$i++) { Start-Sleep -Milliseconds 200 }

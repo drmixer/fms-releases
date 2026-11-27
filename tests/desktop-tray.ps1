@@ -6,8 +6,15 @@ Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,WindowsBase
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public class TrayQA {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, IntPtr name);
+    [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);
+    [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr menu);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetMenuString(IntPtr menu,uint index,StringBuilder s,int max,uint flags);
+    [DllImport("user32.dll")] public static extern bool GetMenuItemRect(IntPtr hwnd,IntPtr menu,uint index,out Rect rect);
+    [DllImport("user32.dll")] public static extern bool GetMenuBarInfo(IntPtr hwnd,int id,int item,ref MenuBarInfo info);
+    [StructLayout(LayoutKind.Sequential)] public struct MenuBarInfo {public uint size;public Rect bounds;public IntPtr menu,submenu;public uint flags;}
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out int pid);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
@@ -16,6 +23,7 @@ public class TrayQA {
     public struct Rect { public int left,top,right,bottom; }
 }
 '@
+[void][TrayQA]::SetThreadDpiAwarenessContext([IntPtr]::new(-4))
 function Controls($className, $ownerId = 0) {
     $handle = [IntPtr]::Zero
     while (($handle = [TrayQA]::FindWindowEx([IntPtr]::Zero,$handle,$className,[IntPtr]::Zero)) -ne [IntPtr]::Zero) {
@@ -61,16 +69,39 @@ function Click-TrayItem($name) {
         $items | ForEach-Object { $_.Current.Name } | Where-Object { $_ } | Select-Object -Unique -First 60 | Out-Host
         throw 'Could not reach the FMS notification icon in Explorer.'
     }
-    Click-Control $icon $true
-    for ($i=0; $i -lt 10; $i++) {
-        $menu = @(Controls '#32768' $app.Id)
-        if ($menu.Count) { break }
+    # Invoke through the taskbar's own provider if available.
+    $invoke=$null
+    if ($icon.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$invoke)) { $invoke.Invoke() }
+    else { Click-Control $icon }
+    for ($i=0; $i -lt 12; $i++) {
+        $handle=[IntPtr]::Zero
+        while (($handle=[TrayQA]::FindWindowEx([IntPtr]::Zero,$handle,'#32768',[IntPtr]::Zero)) -ne [IntPtr]::Zero) {
+            if (-not [TrayQA]::IsWindowVisible($handle)) { continue }
+            $owner=0
+            [void][TrayQA]::GetWindowThreadProcessId($handle,[ref]$owner)
+            if ($i -eq 0) { Write-Host "Popup owner=$owner FMS=$($app.Id)" }
+            if ($owner -ne $app.Id) { continue }
+            $info=New-Object TrayQA+MenuBarInfo
+            $info.size=[Runtime.InteropServices.Marshal]::SizeOf($info)
+            if (-not [TrayQA]::GetMenuBarInfo($handle,-3,0,[ref]$info)) { continue }
+            for ($n=0;$n -lt [TrayQA]::GetMenuItemCount($info.menu);$n++) {
+                $caption=New-Object Text.StringBuilder 250
+                [void][TrayQA]::GetMenuString($info.menu,$n,$caption,250,1024)
+                if ($caption.ToString().Replace('&','').Trim() -ne $name) { continue }
+                $rect=New-Object TrayQA+Rect
+                if (-not [TrayQA]::GetMenuItemRect($handle,$info.menu,$n,[ref]$rect)) { throw 'No menu rectangle.' }
+                [void][TrayQA]::SetCursorPos(($rect.left+$rect.right)/2,($rect.top+$rect.bottom)/2)
+                [TrayQA]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
+                Start-Sleep -Milliseconds 90
+                [TrayQA]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
+                Start-Sleep -Milliseconds 500
+                return
+            }
+        }
         Start-Sleep -Milliseconds 150
     }
-    $menu | ForEach-Object { $_.Current.Name } | Where-Object { $_ } | Out-Host
-    $entry = $menu | Where-Object { $_.Current.Name -eq $name } | Select-Object -First 1
-    if (-not $entry) { throw "Missing FMS tray menu item $name." }
-    Click-Control $entry
+    throw "Missing FMS tray menu item $name."
+
 }
 function WindowSize {
     $r = New-Object TrayQA+Rect
