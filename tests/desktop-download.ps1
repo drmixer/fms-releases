@@ -26,5 +26,11 @@ if (Test-Path $target) {
         $win.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition) |
             ForEach-Object { $_.Current.Name } | Where-Object { $_ -match 'FMS-|uncommon|commonly downloaded|trust|blocked|dangerous|virus|harm|verify|couldn.t download' } | Select-Object -Unique -First 12 | Out-Host
     }
+    $history=Join-Path $profile 'Default/History'
+    if (Test-Path $history) {
+        $copy=Join-Path $env:RUNNER_TEMP ('fms-edge-history-'+[Guid]::NewGuid())
+        Copy-Item $history $copy
+        python -c "import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print('Edge download state, danger type, interrupt reason, received bytes:', db.execute('SELECT state,danger_type,interrupt_reason,received_bytes FROM downloads WHERE target_path LIKE ?',('%FMS-0.1.1-windows-x64-nsis.exe',)).fetchall())" $copy
+    }
     throw 'Edge did not complete a normal download within the test window.'
 }

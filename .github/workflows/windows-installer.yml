@@ -117,3 +117,16 @@ jobs:
         if: "!cancelled() && env.FMS_TEST_EXE != ''"
         shell: powershell
         run: ./tests/desktop-download.ps1
+
+      - name: Scan the verified installer with Microsoft Defender
+        if: "!cancelled() && env.INSTALLER_PATH != ''"
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $status=Get-MpComputerStatus
+          if (-not $status.AntivirusEnabled -or -not $status.AMServiceEnabled) { throw 'The runner has no active Defender antivirus engine.' }
+          Write-Host "Microsoft Defender signatures $($status.AntivirusSignatureVersion), updated $($status.AntivirusSignatureLastUpdated.ToUniversalTime().ToString('u'))"
+          Start-MpScan -ScanType CustomScan -ScanPath $env:INSTALLER_PATH
+          $matches=@(Get-MpThreatDetection | Where-Object { ($_.Resources -join '|').Contains($env:INSTALLER_PATH) })
+          if ($matches.Count -or -not (Test-Path $env:INSTALLER_PATH)) { throw 'Defender reported or removed the test installer.' }
+          Write-Host 'PASS: Custom scan completed with no detection recorded for the verified installer.'

@@ -9,6 +9,8 @@ using System.Runtime.InteropServices;
 public class DialogQA {
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string cls,string title);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd,out int pid);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hwnd,uint msg,IntPtr w,string text);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd,uint msg,IntPtr w,IntPtr l);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
 }
 '@
@@ -25,15 +27,15 @@ do {
         if ($button) {
             [void][DialogQA]::SetForegroundWindow($hwnd)
             if ($Value) {
-                $edit=$controls | Where-Object { $_.Current.AutomationId -eq '1001' -and $_.Current.Name -notlike 'Address:*' } | Select-Object -First 1
+                $fieldId=if ($Action -eq 'Select Folder') { '1152' } else { '1001' }
+                $edit=$controls | Where-Object { $_.Current.AutomationId -eq $fieldId -and $_.Current.Name -notlike 'Address:*' -and $_.Current.NativeWindowHandle } | Select-Object -First 1
                 if (-not $edit) { Start-Sleep -Milliseconds 200; continue }
-                $edit.SetFocus()
-                [Windows.Forms.SendKeys]::SendWait('^a')
-                [Windows.Forms.SendKeys]::SendWait($Value)
-                [Windows.Forms.SendKeys]::SendWait('{ENTER}')
+                [void][DialogQA]::SendMessage([IntPtr]::new($edit.Current.NativeWindowHandle),12,[IntPtr]::Zero,$Value)
+            }
+            if ($button.Current.NativeWindowHandle) {
+                [void][DialogQA]::PostMessage([IntPtr]::new($button.Current.NativeWindowHandle),245,[IntPtr]::Zero,[IntPtr]::Zero)
             } else {
-                $button.SetFocus()
-                [Windows.Forms.SendKeys]::SendWait(' ')
+                $button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
             }
             return
         }

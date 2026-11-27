@@ -69,24 +69,28 @@ function Click-TrayItem($name) {
         $items | ForEach-Object { $_.Current.Name } | Where-Object { $_ } | Select-Object -Unique -First 60 | Out-Host
         throw 'Could not reach the FMS notification icon in Explorer.'
     }
-    # Invoke through the taskbar's own provider if available.
-    $invoke=$null
-    if ($icon.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$invoke)) { $invoke.Invoke() }
-    else { Click-Control $icon }
+    $point=$icon.GetClickablePoint()
+    if (-not [TrayQA]::SetCursorPos($point.X,$point.Y)) { throw 'Could not position pointer on the notification icon.' }
+    Start-Sleep -Milliseconds 150
+    [TrayQA]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 90
+    [TrayQA]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 250
     for ($i=0; $i -lt 12; $i++) {
         $handle=[IntPtr]::Zero
         while (($handle=[TrayQA]::FindWindowEx([IntPtr]::Zero,$handle,'#32768',[IntPtr]::Zero)) -ne [IntPtr]::Zero) {
             if (-not [TrayQA]::IsWindowVisible($handle)) { continue }
             $owner=0
             [void][TrayQA]::GetWindowThreadProcessId($handle,[ref]$owner)
-            if ($i -eq 0) { Write-Host "Popup owner=$owner FMS=$($app.Id)" }
+            if ($owner -eq $app.Id -and $i -eq 1) { Write-Host "FMS owns the visible popup." }
             if ($owner -ne $app.Id) { continue }
             $info=New-Object TrayQA+MenuBarInfo
             $info.size=[Runtime.InteropServices.Marshal]::SizeOf($info)
-            if (-not [TrayQA]::GetMenuBarInfo($handle,-3,0,[ref]$info)) { continue }
+            if (-not [TrayQA]::GetMenuBarInfo($handle,-4,0,[ref]$info)) { continue }
             for ($n=0;$n -lt [TrayQA]::GetMenuItemCount($info.menu);$n++) {
                 $caption=New-Object Text.StringBuilder 250
                 [void][TrayQA]::GetMenuString($info.menu,$n,$caption,250,1024)
+                if ($i -eq 1) { Write-Host ("FMS menu label: "+$caption.ToString()) }
                 if ($caption.ToString().Replace('&','').Trim() -ne $name) { continue }
                 $rect=New-Object TrayQA+Rect
                 if (-not [TrayQA]::GetMenuItemRect($handle,$info.menu,$n,[ref]$rect)) { throw 'No menu rectangle.' }
@@ -132,6 +136,11 @@ try {
     $full = WindowSize
     if ($full.Width -le $quick.Width -or $full.Height -le $quick.Height) { throw 'Open FMS did not restore the manager.' }
     Write-Host 'PASS: Open FMS from the Explorer tray restored the manager.'
+    Click-TrayItem ('Settings'+[char]0x2026)
+    $root=[Windows.Automation.AutomationElement]::FromHandle($main)
+    $settings=$root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition) | Where-Object { $_.Current.Name -like 'Launch at login*' } | Select-Object -First 1
+    if (-not $settings) { throw 'Tray Settings did not open the settings panel.' }
+    Write-Host 'PASS: Tray Settings opened the settings panel.'
     Click-TrayItem 'Quit FMS'
     if (-not $app.WaitForExit(8000) -or $app.ExitCode -ne 0) { throw 'Tray Quit did not exit cleanly.' }
     Write-Host 'PASS: Quit FMS from the Explorer tray exited normally.'
