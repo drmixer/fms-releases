@@ -27,19 +27,31 @@ function Controls($className, $ownerId = 0) {
         $root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
     }
 }
-function Click-Control($element) {
+function Click-Control($element, $right = $false) {
     $box = $element.Current.BoundingRectangle
     if ($box.IsEmpty -or $box.Width -lt 1 -or $box.Height -lt 1) { throw 'No clickable bounds.' }
     if (-not [TrayQA]::SetCursorPos(($box.Left + $box.Width/2),($box.Top + $box.Height/2))) { throw 'Cannot position pointer.' }
-    [TrayQA]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
-    [TrayQA]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
+    $down,$up = if ($right) { 8,16 } else { 2,4 }
+    [TrayQA]::mouse_event($down,0,0,0,[UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 90
+    [TrayQA]::mouse_event($up,0,0,0,[UIntPtr]::Zero)
     Start-Sleep -Milliseconds 550
 }
 function Click-TrayItem($name) {
     $expanded = $false
     for ($attempt=0; $attempt -lt 8; $attempt++) {
         $items = @(foreach ($className in 'Shell_TrayWnd','NotifyIconOverflowWindow','TopLevelWindowForOverflowXamlIsland') { Controls $className })
-        $icon = $items | Where-Object { $_.Current.Name -match '^FMS(?:$|\s)' -and -not $_.Current.IsOffscreen -and $_.Current.ControlType -eq [Windows.Automation.ControlType]::Button } | Select-Object -First 1
+        $icon = $null
+        foreach ($candidate in $items) {
+            if ($candidate.Current.Name -notmatch '^FMS(?:$|\s)' -or $candidate.Current.IsOffscreen) { continue }
+            $ancestor = $candidate
+            $context = for ($depth=0; $depth -lt 9 -and $ancestor; $depth++) {
+                $ancestor.Current.ClassName + '/' + $ancestor.Current.AutomationId + '/' + $ancestor.Current.Name
+                $ancestor=[Windows.Automation.TreeWalker]::RawViewWalker.GetParent($ancestor)
+            }
+            Write-Host ('FMS icon ancestry: ' + ($context -join ' > '))
+            if (($context -join '>') -match 'NotifyIcon|SystemTray|TrayNotify|Notification Area|User Promoted|OverflowWindow') { $icon=$candidate; break }
+        }
         if ($icon) { break }
         $chevron = $items | Where-Object { $_.Current.Name -match 'hidden icons|notification chevron' -and -not $_.Current.IsOffscreen } | Select-Object -First 1
         if ($chevron -and -not $expanded) { Click-Control $chevron; $expanded = $true }
@@ -49,8 +61,12 @@ function Click-TrayItem($name) {
         $items | ForEach-Object { $_.Current.Name } | Where-Object { $_ } | Select-Object -Unique -First 60 | Out-Host
         throw 'Could not reach the FMS notification icon in Explorer.'
     }
-    Click-Control $icon
-    $menu = @(Controls '#32768' $app.Id)
+    Click-Control $icon $true
+    for ($i=0; $i -lt 10; $i++) {
+        $menu = @(Controls '#32768' $app.Id)
+        if ($menu.Count) { break }
+        Start-Sleep -Milliseconds 150
+    }
     $menu | ForEach-Object { $_.Current.Name } | Where-Object { $_ } | Out-Host
     $entry = $menu | Where-Object { $_.Current.Name -eq $name } | Select-Object -First 1
     if (-not $entry) { throw "Missing FMS tray menu item $name." }
