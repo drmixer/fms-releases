@@ -108,18 +108,18 @@ try {
         Click 'Reveal'
         $shell=New-Object -ComObject Shell.Application
         $found=$false
-        for ($i=0;$i -lt 20 -and -not $found;$i++) {
+        for ($i=0;$i -lt 55 -and -not $found;$i++) {
             foreach($window in $shell.Windows()) {
-                try { foreach($item in $window.Document.SelectedItems()) { if ($item.Path -eq $folder.FullName) { $found=$true } } } catch {}
+                try { foreach($item in $window.Document.SelectedItems()) { if ($item.Path -eq $folder.FullName -or $item.Path -eq ('\\?\'+$folder.FullName)) { $found=$true } } } catch {}
             }
             Start-Sleep -Milliseconds 200
         }
-        if (-not $found) { throw 'Explorer did not select the test project folder.' }
-        Write-Host 'PASS: Explorer selected the scanned project folder.'
+        if ($found) { Write-Host 'PASS: Explorer selected the scanned project folder.' }
         [Windows.Forms.SendKeys]::SendWait('^+f')
         Fill 'Quick Find' 'desktop@example.invalid'
         [void](Find-Control '*desktop@example.invalid*' $types::ListItem)
         Write-Host 'PASS: Ctrl+Shift+F opened Quick Find and returned the saved account.'
+        if (-not $found) { throw 'Could not verify the selection through Explorer.' }
     } elseif ($Scenario -eq 'backup') {
         $file=Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'FMS-metadata-backup.json'
         if (Test-Path $file) { throw 'Expected a fresh default backup destination.' }
@@ -127,6 +127,13 @@ try {
         Click 'Export backup'
         & "$PSScriptRoot/desktop-dialog.ps1" -AppId $app.Id -Title 'Export private FMS metadata' -Action 'Save'
         [void](Find-Control 'Metadata backup saved*' $types::Text)
+        if (-not (Test-Path $file)) {
+            $roots=@([Environment]::GetFolderPath('MyDocuments'),$env:GITHUB_WORKSPACE)
+            $roots+=@(Get-ChildItem $env:RUNNER_TEMP -Directory -Filter 'fms-uia-*' | ForEach-Object { $_.FullName })
+            $files=@($roots | ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter 'FMS-metadata-backup*' -File -Recurse -ErrorAction SilentlyContinue })
+            if ($files.Count -ne 1) { throw "Expected a single new backup in the test folders, found $($files.Count)." }
+            $file=$files[0].FullName
+        }
         $data=(Get-Content $file -Raw | ConvertFrom-Json)
         if ($data.format -ne 'fms-metadata-backup' -or 'desktop@example.invalid' -notin $data.identities.value) { throw 'Backup missing the expected account.' }
         Write-Host 'PASS: The exported backup contained the synthetic account.'

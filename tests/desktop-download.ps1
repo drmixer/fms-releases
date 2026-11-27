@@ -3,11 +3,31 @@ if ($env:GITHUB_REPOSITORY -ne 'drmixer/fms-releases' -or $env:RUNNER_ENVIRONMEN
 $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe","$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $edge) { throw 'No installed Edge browser.' }
 $asset='FMS-0.1.1-windows-x64-nsis.exe'
-$url="https://github.com/drmixer/fms-releases/releases/download/v0.1.1/$asset"
+$url='https://github.com/drmixer/fms-releases/releases/expanded_assets/v0.1.1'
 $target=Join-Path ([Environment]::GetFolderPath('UserProfile')) "Downloads\$asset"
 if (Test-Path $target) { throw 'Download destination already exists.' }
 $profile=Join-Path $env:RUNNER_TEMP ('fms-browser-'+[Guid]::NewGuid())
 Start-Process $edge -ArgumentList "--no-first-run --user-data-dir=`"$profile`" $url"
+Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+$ui=[Windows.Automation.AutomationElement]
+$deadline=(Get-Date).AddSeconds(20)
+$link=$null
+do {
+    $windows=$ui::RootElement.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
+    foreach ($win in $windows) {
+        if ((Get-Process -Id $win.Current.ProcessId -ErrorAction SilentlyContinue).ProcessName -ne 'msedge') { continue }
+        $match=[Windows.Automation.PropertyCondition]::new($ui::NameProperty,$asset)
+        $link=$win.FindAll([Windows.Automation.TreeScope]::Descendants,$match) | Where-Object { $_.Current.ControlType -eq [Windows.Automation.ControlType]::Hyperlink } | Select-Object -First 1
+        if ($link) { break }
+    }
+    if (-not $link) { Start-Sleep -Milliseconds 400 }
+} while (-not $link -and (Get-Date) -lt $deadline)
+if (-not $link) {
+    $windows | Where-Object { (Get-Process -Id $_.Current.ProcessId -ErrorAction SilentlyContinue).ProcessName -eq 'msedge' } | ForEach-Object { Write-Host ('Edge window: '+$_.Current.Name) }
+    throw 'The hosted Edge browser did not expose the public release asset link.'
+}
+$link.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+Write-Host 'Clicked the executable link on the GitHub release in the runner browser.'
 for ($i=0;$i -lt 60 -and -not (Test-Path $target);$i++) {Start-Sleep -Milliseconds 500}
 if (Test-Path $target) {
     if ((Get-FileHash $target).Hash -ne $env:RELEASE_SHA256) { throw 'Browser download digest differed.' }
@@ -30,7 +50,7 @@ if (Test-Path $target) {
     if (Test-Path $history) {
         $copy=Join-Path $env:RUNNER_TEMP ('fms-edge-history-'+[Guid]::NewGuid())
         Copy-Item $history $copy
-        python -c "import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print('Edge download state, danger type, interrupt reason, received bytes:', db.execute('SELECT state,danger_type,interrupt_reason,received_bytes FROM downloads WHERE target_path LIKE ?',('%FMS-0.1.1-windows-x64-nsis.exe',)).fetchall())" $copy
+        python -c "import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print('Edge download state, danger type, interrupt reason, received bytes:', db.execute('SELECT state,danger_type,interrupt_reason,received_bytes FROM downloads WHERE id IN (SELECT id FROM downloads_url_chains WHERE url LIKE ?)',('%FMS-0.1.1-windows-x64-nsis.exe%',)).fetchall())" $copy
     }
     throw 'Edge did not complete a normal download within the test window.'
 }
